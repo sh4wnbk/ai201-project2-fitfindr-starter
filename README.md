@@ -1,5 +1,7 @@
 # FitFindr
 
+![FitFindr](assets/banner.png)
+
 FitFindr is a multi-tool AI agent that helps you find secondhand clothing and figure out how to wear it. You describe what you're looking for in plain language — including size and budget if you want — and the agent searches a listings dataset, suggests outfits using your wardrobe, and writes a shareable caption for the find. It runs as a Gradio web app.
 
 The agent doesn't run a fixed script. It decides what to do based on what each step returns: if the search finds nothing, it loosens the filters and tries again before giving up, and it never passes empty results into the steps that follow.
