@@ -4,7 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
-from tools import search_listings, suggest_outfit, create_fit_card
+from tools import search_listings, suggest_outfit, create_fit_card, compare_price
 
 # ──────────────────────────────────────────────
 # System / Styling Prompts
@@ -75,6 +75,8 @@ def _new_session(query: str, wardrobe: dict) -> dict:
         "search_results": [],        
         "selected_item": None,       
         "wardrobe": wardrobe,        
+        "adjustments": [],           
+        "price_assessment": None,    
         "outfit_suggestion": None,   
         "fit_card": None,            
         "error": None,               
@@ -104,20 +106,35 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     
     # Step 4: Check if any listings were returned (No-results path guardrail)
     if not results:
-        session["error"] = f"No thrift listings found for '{description}' matching your criteria."
-        return session
+        results = search_listings(description, None, max_price)
+        session["search_results"] = results
+        if results:
+            session["adjustments"].append("removed size filter")
+        else:
+            results = search_listings(description, None, None)
+            session["search_results"] = results
+            if results:
+                session["adjustments"].append("removed price limit")
+            else:
+                session["error"] = (
+                    "No listings matched even after removing the size and price filters. Try a different description."
+                )
+                return session
         
     # Step 5: Select the top matching item (first item in the sorted results list)
     session["selected_item"] = results[0]
+
+    # Step 6: Compare the selected item's price against category comps
+    session["price_assessment"] = compare_price(session["selected_item"])
     
-    # Step 6: Generate outfit recommendations using Tool 2
+    # Step 7: Generate outfit recommendations using Tool 2
     try:
         session["outfit_suggestion"] = suggest_outfit(session["selected_item"], session["wardrobe"])
     except Exception as e:
         session["error"] = f"Failed to generate outfit suggestion: {e}"
         return session
 
-    # Step 7: Create the social media caption using Tool 3
+    # Step 8: Create the social media caption using Tool 3
     try:
         session["fit_card"] = create_fit_card(session["outfit_suggestion"], session["selected_item"])
     except Exception as e:
