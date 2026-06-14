@@ -131,8 +131,63 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
 
     Before writing code, fill in the Tool 2 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    try:
+        client = _get_gemini_client()
+        items = wardrobe.get("items") or []
+
+        item_title = new_item.get("title", "this item")
+        item_description = new_item.get("description", "")
+        item_style_tags = ", ".join(new_item.get("style_tags", []))
+        item_colors = ", ".join(new_item.get("colors", []))
+
+        system_instruction = (
+            "You are a practical, fashion-savvy stylist. Give clear, specific, "
+            "and helpful outfit advice. Keep suggestions concise, grounded, and easy to wear."
+        )
+
+        if not items:
+            prompt = (
+                f"Suggest general styling advice for this thrifted item:\n"
+                f"Title: {item_title}\n"
+                f"Description: {item_description}\n"
+                f"Style tags: {item_style_tags}\n"
+                f"Colors: {item_colors}\n\n"
+                "Explain what kinds of pieces pair well with it, what vibe it suits, "
+                "and any simple outfit formulas that would work."
+            )
+        else:
+            wardrobe_lines = []
+            for wardrobe_item in items:
+                name = wardrobe_item.get("name", "Unnamed item")
+                category = wardrobe_item.get("category", "unknown category")
+                colors = ", ".join(wardrobe_item.get("colors", []))
+                notes = wardrobe_item.get("notes", "")
+                wardrobe_lines.append(f"- {name} ({category}, {colors}, {notes})")
+
+            prompt = (
+                f"Suggest 1-2 outfit combinations using this thrifted item:\n"
+                f"Title: {item_title}\n"
+                f"Description: {item_description}\n"
+                f"Style tags: {item_style_tags}\n"
+                f"Colors: {item_colors}\n\n"
+                "Wardrobe items:\n"
+                + "\n".join(wardrobe_lines)
+                + "\n\nUse the new item and name specific wardrobe pieces in each outfit."
+            )
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.7,
+                max_output_tokens=400,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        return response.text
+    except Exception:
+        return "Couldn't generate outfit suggestions right now. Try describing your wardrobe and I can help manually."
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
