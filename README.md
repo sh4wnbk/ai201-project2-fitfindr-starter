@@ -14,13 +14,13 @@ The agent doesn't run a fixed script. It decides what to do based on what each s
 pip install -r requirements.txt
 ```
 
-Add your Gemini API key to a `.env` file in the project root (this file is gitignored — don't commit it):
+Add your Cerebras API key to a `.env` file in the project root (this file is gitignored — don't commit it):
 
 ```
-GEMINI_API_KEY=your_key_here
+CEREBRAS_API_KEY=your_key_here
 ```
 
-Get a free key at https://aistudio.google.com/apikey.
+Get a free API key at https://cloud.cerebras.ai.
 
 Then start the app:
 
@@ -54,7 +54,7 @@ The agent uses four tools. Three are required; `compare_price` is a stretch feat
 
 **Returns:** A string with one or two outfit suggestions. When the wardrobe has items, the suggestions name specific pieces from it. When the wardrobe is empty, it returns general styling advice for the item instead.
 
-**Purpose:** Turns a found item into wearable outfit ideas grounded in what the user already owns. This tool calls the Gemini model.
+**Purpose:** Turns a found item into wearable outfit ideas grounded in what the user already owns. This tool calls the Cerebras model (gpt-oss-120b).
 
 ### `create_fit_card(outfit, new_item)`
 
@@ -62,7 +62,7 @@ The agent uses four tools. Three are required; `compare_price` is a stretch feat
 
 **Returns:** A short, casual caption (2–4 sentences) that reads like a real outfit post. It mentions the item name, price, and platform once each and varies between runs.
 
-**Purpose:** Produces the shareable end product. This tool calls the Gemini model with a higher temperature so captions don't repeat.
+**Purpose:** Produces the shareable end product. This tool calls the Cerebras model (gpt-oss-120b) with a higher temperature so captions don't repeat.
 
 ### `compare_price(item)` — stretch
 
@@ -78,7 +78,7 @@ The agent uses four tools. Three are required; `compare_price` is a stretch feat
 
 The loop lives in `run_agent()` in `agent.py`. It runs the tools in order, but the order is not fixed — it branches on what the search returns. Here is the conditional logic, step by step:
 
-1. **Parse the query.** The raw text ("vintage graphic tee under $30, size M") goes to the Gemini model, which extracts a `description`, `size`, and `max_price`. If parsing fails, the agent falls back to using the whole query as the description with no size or price filter.
+1. **Parse the query.** The raw text ("vintage graphic tee under $30, size M") goes to the Cerebras model (gpt-oss-120b), which extracts a `description`, `size`, and `max_price`. If parsing fails, the agent falls back to using the whole query as the description with no size or price filter.
 
 2. **Search, and branch on the result.** The agent calls `search_listings` with the parsed values, then checks whether the result list is empty.
    - **If it found something**, it takes the top result and continues.
@@ -146,7 +146,7 @@ Each tool handles its own failure so one broken step doesn't take down the whole
 
 ```mermaid
 flowchart TD
-    Q[User query] --> P[Parse query with Gemini]
+    Q[User query] --> P[Parse query with Cerebras]
     P --> S[search_listings]
     S -->|results found| SEL[selected_item = top result]
     S -->|empty| R1[Retry: drop size filter]
@@ -169,7 +169,7 @@ flowchart TD
 
 **One way the spec helped.** Writing the tool signatures and failure modes in `planning.md` before any code meant each Copilot prompt was a near-direct copy of a spec block. The tools came out matching their intended interfaces on the first or second try because the inputs, return shapes, and failure behavior were already decided. The error-handling table in particular turned into the implementation almost line for line.
 
-**One way the implementation diverged, and why.** The plan assumed a working Gemini model and didn't account for quota. In practice, `gemini-2.5-flash` has a 20-request-per-day free-tier limit, which the build hit during testing — every model call started returning the fallback strings even though the code was correct. The fix was switching to `gemini-2.5-flash-lite`, which has far more daily headroom. A second smaller divergence: the plan had the outfit and caption tools self-handle their errors by returning fallback strings, but the agent loop also wraps them in try/except as a safety net. Since the tools don't raise, the net never fires — it's redundant, but harmless, and it means an unexpected failure still can't crash the run.
+**One way the implementation diverged, and why.** The plan assumed a working Gemini model and didn't account for quota. In practice, `gemini-2.5-flash` has a 20-request-per-day free-tier limit, which the build hit during testing — every model call started returning the fallback strings even though the code was correct. The first fix was switching to `gemini-2.5-flash-lite`, which has far more daily headroom. But the quota wall returned during extended testing, and the cumulative daily limit made Gemini unreliable as a development target. The project migrated to Cerebras (`gpt-oss-120b`) after the initial build, replacing all Gemini SDK calls with the Cerebras chat completions API. The migration introduced a new wrinkle: `gpt-oss-120b` is a reasoning model, so `max_completion_tokens` covers both internal reasoning tokens and the visible response — the original token ceilings (400 for outfits, 200 for captions) were too small once reasoning overhead was included. The fix was raising those limits to 1500 and 800 respectively. A second smaller divergence: the plan had the outfit and caption tools self-handle their errors by returning fallback strings, but the agent loop also wraps them in try/except as a safety net. Since the tools don't raise, the net never fires — it's redundant, but harmless, and it means an unexpected failure still can't crash the run.
 
 ---
 

@@ -190,7 +190,7 @@ app.py reads session and populates 3 output panels:
 
 For `search_listings`: Give Copilot the Tool 1 spec block above (inputs, scoring logic, return value, failure mode) and the `load_listings()` function signature from `utils/data_loader.py`. Ask it to implement the function body inside `tools.py`. Verify: does it filter by both price and size before scoring? Does it return `[]` instead of raising? Test with 3 queries: one that returns results, one that returns nothing, one that checks price filtering.
 
-For `suggest_outfit`: Give Copilot the Tool 2 spec block and the example wardrobe item schema. Ask it to implement using the Groq client already in the file. Verify: does it handle the empty wardrobe case with a different prompt path? Does it wrap the LLM call in try/except? Test with `get_example_wardrobe()` and `get_empty_wardrobe()`.
+For `suggest_outfit`: Give Copilot the Tool 2 spec block and the example wardrobe item schema. Ask it to implement using the Cerebras client (gpt-oss-120b) already in the file. Verify: does it handle the empty wardrobe case with a different prompt path? Does it wrap the LLM call in try/except? Test with `get_example_wardrobe()` and `get_empty_wardrobe()`.
 
 For `create_fit_card`: Give Copilot the Tool 3 spec block. Ask it to implement with temperature=0.9 and the guard clause for empty outfit. Verify: does the guard run before the LLM call? Does it mention title/price/platform in the prompt? Run 3 times on the same input — outputs must differ.
 
