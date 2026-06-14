@@ -13,6 +13,7 @@ Tools:
 """
 
 import os
+import statistics
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -259,3 +260,65 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
         return response.text
     except Exception:
         return "Fit card generation failed. Here's the outfit suggestion instead: " + outfit
+
+
+# ── Tool 4: compare_price ────────────────────────────────────────────────────
+
+def compare_price(item: dict) -> dict:
+    try:
+        listings = load_listings()
+        category = item.get("category")
+        item_id = item.get("id")
+        item_price = item.get("price")
+
+        comps = [
+            listing
+            for listing in listings
+            if listing.get("category") == category and listing.get("id") != item_id
+        ]
+
+        comp_count = len(comps)
+        if comp_count < 2:
+            return {
+                "assessment": "insufficient data",
+                "item_price": item_price,
+                "median_comp": None,
+                "comp_count": comp_count,
+                "reasoning": "Not enough comparable listings in this category to assess the price.",
+            }
+
+        comp_prices = [listing["price"] for listing in comps if listing.get("price") is not None]
+        median_comp = statistics.median(comp_prices)
+
+        if item_price <= 0.85 * median_comp:
+            assessment = "good deal"
+        elif item_price >= 1.15 * median_comp:
+            assessment = "overpriced"
+        else:
+            assessment = "fair"
+
+        price_relation = (
+            "below" if assessment == "good deal" else "above" if assessment == "overpriced" else "near"
+        )
+        verdict_phrase = (
+            "a good deal" if assessment == "good deal" else "overpriced" if assessment == "overpriced" else "fair"
+        )
+        reasoning = (
+            f"At ${item_price} it's {price_relation} the ${median_comp} median for {category}, so it's {verdict_phrase}."
+        )
+
+        return {
+            "assessment": assessment,
+            "item_price": item_price,
+            "median_comp": median_comp,
+            "comp_count": comp_count,
+            "reasoning": reasoning,
+        }
+    except Exception:
+        return {
+            "assessment": "insufficient data",
+            "item_price": item.get("price"),
+            "median_comp": None,
+            "comp_count": 0,
+            "reasoning": "Not enough comparable listings in this category to assess the price.",
+        }
