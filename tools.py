@@ -219,5 +219,43 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
 
     Before writing code, fill in the Tool 3 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    if not outfit or not outfit.strip():
+        return "Unable to generate a fit card — outfit description was missing."
+
+    try:
+        client = _get_gemini_client()
+
+        item_title = new_item.get("title", "this item")
+        item_price = new_item.get("price", "unknown price")
+        item_platform = new_item.get("platform", "unknown platform")
+        item_condition = new_item.get("condition", "unknown condition")
+
+        system_instruction = (
+            "You write casual, lowercase ootd captions with a specific, natural voice. "
+            "Keep the caption 2-4 sentences, avoid generic phrasing, and make it sound like a real post."
+        )
+
+        prompt = (
+            f"Write a 2-4 sentence lowercase casual ootd caption for this thrift find.\n"
+            f"Item name: {item_title}\n"
+            f"Price: {item_price}\n"
+            f"Platform: {item_platform}\n"
+            f"Condition: {item_condition}\n"
+            f"Outfit: {outfit}\n\n"
+            "Requirements: mention the item name, price, and platform once each; capture the vibe in specific terms; "
+            "do not use generic phrases like 'love this look'."
+        )
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.9,
+                max_output_tokens=200,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        return response.text
+    except Exception:
+        return "Fit card generation failed. Here's the outfit suggestion instead: " + outfit
