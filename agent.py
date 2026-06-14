@@ -1,47 +1,83 @@
-"""
-agent.py
-
-The FitFindr planning loop. Orchestrates the three tools in response to a
-natural language user query, passing state between them via a session dict.
-
-Complete tools.py and test each tool in isolation before implementing this file.
-
-Usage (once implemented):
-    from agent import run_agent
-    from utils.data_loader import get_example_wardrobe
-
-    result = run_agent(
-        query="vintage graphic tee under $30, size M",
-        wardrobe=get_example_wardrobe(),
-    )
-    print(result["fit_card"])
-    print(result["error"])   # None on success
-"""
-
+import os
+import json
+from typing import Optional
+from pydantic import BaseModel, Field
+from google import genai
+from google.genai import types
 from tools import search_listings, suggest_outfit, create_fit_card
+
+# ──────────────────────────────────────────────
+# System / Styling Prompts
+# ──────────────────────────────────────────────
+
+PARSER_PROMPT = (
+    "You are a data extraction assistant. Parse a thrift shopping query "
+    "and extract the item description, clothing size, and maximum price."
+)
+
+STYLING_PROMPT = (
+    "You are a trendy fashion stylist and personal shopper. "
+    "Help users build outfits using thrifted finds and items from their current wardrobe. "
+    "Keep your advice practical, stylish, and tailored to the item's vibe."
+)
+
+CAPTION_PROMPT = (
+    "You are a social media manager creating fashion content. "
+    "Generate short, casual, and authentic outfit captions for OOTD posts. "
+    "Ensure the caption feels genuine, mentions the item naturally, and matches the vibe."
+)
+
+# ── Gemini Structured Output Schema ───────────────────────────────────────────
+
+class QueryTemplate(BaseModel):
+    description: str = Field(description="Keywords describing the clothing item (e.g., 'vintage graphic tee').")
+    size: Optional[str] = Field(None, description="The requested clothing size (e.g., 'M', 'S', 'L', 'XXS'). If not mentioned, return null.")
+    max_price: Optional[float] = Field(None, description="The numerical maximum price constraint (e.g., 30.0). Do not include dollar signs. If not mentioned, return null.")
+
+# ── Gemini Helper for Parsing ──────────────────────────────────────────────────
+
+def _parse_query_with_gemini(query: str) -> dict:
+    """Uses gemini-2.5-flash native structured output to extract search parameters safely."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return {"description": query, "size": None, "max_price": None}
+        
+    client = genai.Client(api_key=api_key)
+    
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=f"Parse this thrift shopping query: {query}",
+            config=types.GenerateContentConfig(
+                system_instruction=PARSER_PROMPT,
+                response_mime_type="application/json",
+                response_schema=QueryTemplate,
+            )
+        )
+        data: QueryTemplate = response.parsed
+        return {
+            "description": data.description,
+            "size": data.size,
+            "max_price": data.max_price
+        }
+    except Exception as e:
+        print(f"Error parsing query with Gemini: {e}")
+        return {"description": query, "size": None, "max_price": None}
 
 
 # ── session state ─────────────────────────────────────────────────────────────
 
 def _new_session(query: str, wardrobe: dict) -> dict:
-    """
-    Initialize and return a fresh session dict for one user interaction.
-
-    The session dict is the single source of truth for everything that happens
-    during a run — it stores the original query, parsed parameters, tool results,
-    and any error that caused early termination.
-
-    You may add fields to this dict as needed for your implementation.
-    """
+    """Initialize and return a fresh session dict for one user interaction."""
     return {
-        "query": query,              # original user query
-        "parsed": {},                # extracted description / size / max_price
-        "search_results": [],        # list of matching listing dicts
-        "selected_item": None,       # top result, passed into suggest_outfit
-        "wardrobe": wardrobe,        # user's wardrobe dict
-        "outfit_suggestion": None,   # string returned by suggest_outfit
-        "fit_card": None,            # string returned by create_fit_card
-        "error": None,               # set if the interaction ended early
+        "query": query,              
+        "parsed": {},                
+        "search_results": [],        
+        "selected_item": None,       
+        "wardrobe": wardrobe,        
+        "outfit_suggestion": None,   
+        "fit_card": None,            
+        "error": None,               
     }
 
 
@@ -51,50 +87,43 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     """
     Main agent entry point. Runs the FitFindr planning loop for a single
     user interaction and returns the completed session dict.
-
-    Args:
-        query:    Natural language user request
-                  (e.g., "vintage graphic tee under $30, size M")
-        wardrobe: User's wardrobe dict — use get_example_wardrobe() or
-                  get_empty_wardrobe() from utils/data_loader.py
-
-    Returns:
-        The session dict after the interaction completes. Check session["error"]
-        first — if it is not None, the interaction ended early and the other
-        output fields (outfit_suggestion, fit_card) will be None.
-
-    TODO — implement this function using the planning loop you designed in planning.md:
-
-        Step 1: Initialize the session with _new_session().
-
-        Step 2: Parse the user's query to extract a description, size, and
-                max_price. You can use regex, string splitting, or ask the LLM
-                to parse it — document your choice in planning.md.
-                Store the result in session["parsed"].
-
-        Step 3: Call search_listings() with the parsed parameters.
-                Store results in session["search_results"].
-                If no results: set session["error"] to a helpful message and
-                return the session early. Do NOT proceed to suggest_outfit
-                with empty input.
-
-        Step 4: Select the item to use (e.g., the top result).
-                Store it in session["selected_item"].
-
-        Step 5: Call suggest_outfit() with the selected item and wardrobe.
-                Store the result in session["outfit_suggestion"].
-
-        Step 6: Call create_fit_card() with the outfit suggestion and selected item.
-                Store the result in session["fit_card"].
-
-        Step 7: Return the session.
-
-    Before writing code, complete the Planning Loop and State Management sections
-    of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
+    # Step 1: Initialize the session
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    # Step 2: Parse the user's query using our Gemini helper
+    session["parsed"] = _parse_query_with_gemini(query)
+    
+    description = session["parsed"].get("description", query)
+    size = session["parsed"].get("size")
+    max_price = session["parsed"].get("max_price")
+
+    # Step 3: Call search_listings() with the parsed parameters
+    results = search_listings(description, size, max_price)
+    session["search_results"] = results
+    
+    # Step 4: Check if any listings were returned (No-results path guardrail)
+    if not results:
+        session["error"] = f"No thrift listings found for '{description}' matching your criteria."
+        return session
+        
+    # Step 5: Select the top matching item (first item in the sorted results list)
+    session["selected_item"] = results[0]
+    
+    # Step 6: Generate outfit recommendations using Tool 2
+    try:
+        session["outfit_suggestion"] = suggest_outfit(session["selected_item"], session["wardrobe"])
+    except Exception as e:
+        session["error"] = f"Failed to generate outfit suggestion: {e}"
+        return session
+
+    # Step 7: Create the social media caption using Tool 3
+    try:
+        session["fit_card"] = create_fit_card(session["outfit_suggestion"], session["selected_item"])
+    except Exception as e:
+        session["error"] = f"Failed to create fit card: {e}"
+        return session
+    
     return session
 
 
@@ -111,7 +140,8 @@ if __name__ == "__main__":
     if session["error"]:
         print(f"Error: {session['error']}")
     else:
-        print(f"Found: {session['selected_item']['title']}")
+        title = session["selected_item"].get("title") if session["selected_item"] else "None"
+        print(f"Found: {title}")
         print(f"\nOutfit: {session['outfit_suggestion']}")
         print(f"\nFit card: {session['fit_card']}")
 

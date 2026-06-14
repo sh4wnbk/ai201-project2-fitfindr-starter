@@ -13,25 +13,25 @@ Tools:
 """
 
 import os
-
 from dotenv import load_dotenv
-from groq import Groq
+from google import genai
+from google.genai import types
 
 from utils.data_loader import load_listings
 
 load_dotenv()
 
 
-# ── Groq client ───────────────────────────────────────────────────────────────
+# ── Gemini client ─────────────────────────────────────────────────────────────
 
-def _get_groq_client():
-    """Initialize and return a Groq client using GROQ_API_KEY from .env."""
-    api_key = os.environ.get("GROQ_API_KEY")
+def _get_gemini_client():
+    """Initialize and return a Gemini client using GEMINI_API_KEY from .env."""
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise ValueError(
-            "GROQ_API_KEY not set. Add it to a .env file in the project root."
+            "GEMINI_API_KEY not set. Add it to a .env file in the project root."
         )
-    return Groq(api_key=api_key)
+    return genai.Client(api_key=api_key)
 
 
 # ── Tool 1: search_listings ───────────────────────────────────────────────────
@@ -69,8 +69,39 @@ def search_listings(
 
     Before writing code, fill in the Tool 1 section of planning.md.
     """
-    # Replace this with your implementation
-    return []
+    try:
+        listings = load_listings()
+        search_words = description.lower().split()
+        scored_listings = []
+
+        for listing in listings:
+            try:
+                price = listing.get("price")
+                if max_price is not None and price is not None and price > max_price:
+                    continue
+
+                if size is not None:
+                    listing_size = str(listing.get("size", "")).lower()
+                    if size.lower() not in listing_size:
+                        continue
+
+                combined_text = (
+                    f"{listing.get('title', '')} {listing.get('description', '')} "
+                    f"{' '.join(listing.get('style_tags', []))} "
+                    f"{' '.join(listing.get('colors', []))} "
+                    f"{listing.get('brand') or ''}"
+                ).lower()
+
+                score = sum(1 for word in search_words if word in combined_text)
+                if score > 0:
+                    scored_listings.append((score, listing))
+            except Exception:
+                continue
+
+        scored_listings.sort(key=lambda item: item[0], reverse=True)
+        return [listing for _, listing in scored_listings]
+    except Exception:
+        return []
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
