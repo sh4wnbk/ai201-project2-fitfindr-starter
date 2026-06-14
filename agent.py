@@ -1,9 +1,7 @@
 import os
 import json
-from typing import Optional
-from pydantic import BaseModel, Field
-from google import genai
-from google.genai import types
+import re
+from cerebras.cloud.sdk import Cerebras
 from tools import search_listings, suggest_outfit, create_fit_card, compare_price
 
 # ──────────────────────────────────────────────
@@ -27,41 +25,44 @@ CAPTION_PROMPT = (
     "Ensure the caption feels genuine, mentions the item naturally, and matches the vibe."
 )
 
-# ── Gemini Structured Output Schema ───────────────────────────────────────────
+# ── Cerebras Helper for Parsing ───────────────────────────────────────────────
 
-class QueryTemplate(BaseModel):
-    description: str = Field(description="Keywords describing the clothing item (e.g., 'vintage graphic tee').")
-    size: Optional[str] = Field(None, description="The requested clothing size (e.g., 'M', 'S', 'L', 'XXS'). If not mentioned, return null.")
-    max_price: Optional[float] = Field(None, description="The numerical maximum price constraint (e.g., 30.0). Do not include dollar signs. If not mentioned, return null.")
-
-# ── Gemini Helper for Parsing ──────────────────────────────────────────────────
-
-def _parse_query_with_gemini(query: str) -> dict:
-    """Uses gemini-2.5-flash native structured output to extract search parameters safely."""
-    api_key = os.environ.get("GEMINI_API_KEY")
+def _parse_query(query: str) -> dict:
+    """Uses Cerebras llama-3.3-70b to extract search parameters from a query."""
+    api_key = os.environ.get("CEREBRAS_API_KEY")
     if not api_key:
         return {"description": query, "size": None, "max_price": None}
-        
-    client = genai.Client(api_key=api_key)
-    
+
+    client = Cerebras(api_key=api_key)
+
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=f"Parse this thrift shopping query: {query}",
-            config=types.GenerateContentConfig(
-                system_instruction=PARSER_PROMPT,
-                response_mime_type="application/json",
-                response_schema=QueryTemplate,
-            )
+        response = client.chat.completions.create(
+            model="gpt-oss-120b",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        PARSER_PROMPT
+                        + "\n\nRespond with JSON only — no markdown, no explanation. "
+                        'Format: {"description": "...", "size": "..." or null, "max_price": number or null}'
+                    ),
+                },
+                {"role": "user", "content": f"Parse this thrift shopping query: {query}"},
+            ],
+            temperature=0.0,
+            max_completion_tokens=600,
         )
-        data: QueryTemplate = response.parsed
+        text = response.choices[0].message.content.strip()
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+        data = json.loads(text)
         return {
-            "description": data.description,
-            "size": data.size,
-            "max_price": data.max_price
+            "description": data.get("description", query),
+            "size": data.get("size"),
+            "max_price": float(data["max_price"]) if data.get("max_price") is not None else None,
         }
     except Exception as e:
-        print(f"Error parsing query with Gemini: {e}")
+        print(f"Error parsing query: {e}")
         return {"description": query, "size": None, "max_price": None}
 
 
@@ -93,8 +94,8 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     # Step 1: Initialize the session
     session = _new_session(query, wardrobe)
 
-    # Step 2: Parse the user's query using our Gemini helper
-    session["parsed"] = _parse_query_with_gemini(query)
+    # Step 2: Parse the user's query
+    session["parsed"] = _parse_query(query)
     
     description = session["parsed"].get("description", query)
     size = session["parsed"].get("size")

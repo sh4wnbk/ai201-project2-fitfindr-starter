@@ -15,24 +15,29 @@ Tools:
 import os
 import statistics
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from cerebras.cloud.sdk import Cerebras
 
 from utils.data_loader import load_listings
 
 load_dotenv()
 
 
-# ── Gemini client ─────────────────────────────────────────────────────────────
+# ── Cerebras client ───────────────────────────────────────────────────────────
 
-def _get_gemini_client():
-    """Initialize and return a Gemini client using GEMINI_API_KEY from .env."""
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "GEMINI_API_KEY not set. Add it to a .env file in the project root."
-        )
-    return genai.Client(api_key=api_key)
+_client = Cerebras(api_key=os.environ.get("CEREBRAS_API_KEY"))
+
+
+def _chat(prompt: str, system: str, temperature: float, max_tokens: int) -> str:
+    response = _client.chat.completions.create(
+        model="gpt-oss-120b",
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=temperature,
+        max_completion_tokens=max_tokens,
+    )
+    return response.choices[0].message.content
 
 
 # ── Tool 1: search_listings ───────────────────────────────────────────────────
@@ -133,7 +138,6 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
     Before writing code, fill in the Tool 2 section of planning.md.
     """
     try:
-        client = _get_gemini_client()
         items = wardrobe.get("items") or []
 
         item_title = new_item.get("title", "this item")
@@ -176,17 +180,7 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
                 + "\n\nUse the new item and name specific wardrobe pieces in each outfit."
             )
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.7,
-                max_output_tokens=400,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
-        )
-        return response.text
+        return _chat(prompt, system_instruction, temperature=0.7, max_tokens=1500)
     except Exception:
         return "Couldn't generate outfit suggestions right now. Try describing your wardrobe and I can help manually."
 
@@ -224,8 +218,6 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
         return "Unable to generate a fit card — outfit description was missing."
 
     try:
-        client = _get_gemini_client()
-
         item_title = new_item.get("title", "this item")
         item_price = new_item.get("price", "unknown price")
         item_platform = new_item.get("platform", "unknown platform")
@@ -247,17 +239,7 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
             "do not use generic phrases like 'love this look'."
         )
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.9,
-                max_output_tokens=200,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
-        )
-        return response.text
+        return _chat(prompt, system_instruction, temperature=0.9, max_tokens=800)
     except Exception:
         return "Fit card generation failed. Here's the outfit suggestion instead: " + outfit
 

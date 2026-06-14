@@ -1,4 +1,4 @@
-google-genai
+cerebras-cloud-sdk>=1.67.0
 python-dotenv==1.0.1
 gradio>=6.9.0
 pytest>=8.0.0
