@@ -59,7 +59,17 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
 
     item = session["selected_item"]
     listing = f'{item["title"]}\n${item["price"]} · {item["platform"]} · {item["condition"]} condition'
-    return (listing, session["outfit_suggestion"], session["fit_card"])
+
+    price_assessment = session.get("price_assessment")
+    if price_assessment is not None and price_assessment.get("assessment") != "insufficient data":
+        listing += f'\n💰 {price_assessment["reasoning"]}'
+
+    outfit_suggestion = session["outfit_suggestion"]
+    adjustments = session.get("adjustments") or []
+    if adjustments:
+        outfit_suggestion = f'⚠️ Adjusted search: {", ".join(adjustments)}.\n\n' + outfit_suggestion
+
+    return (listing, outfit_suggestion, session["fit_card"])
 
 
 # ── interface ─────────────────────────────────────────────────────────────────
