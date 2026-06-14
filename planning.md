@@ -220,3 +220,82 @@ For `handle_query()` in `app.py`: Give Copilot the session dict field table and 
 - **Fit Card:** (the caption from Step 4)
 
 **Error path example:** User queries "designer ballgown size XXS under $5". `search_listings` returns `[]`. `session["error"]` is set to "No listings matched your search. Try a broader description, a different size, or a higher budget." Session returns immediately. `suggest_outfit` and `create_fit_card` are never called. The Search Result panel shows the error message; the other two panels are blank.
+## Stretch Feature Additions
+
+> Added before implementing stretch features, per project instructions.
+
+### Tool 4: compare_price (STRETCH)
+
+**What it does:**
+Given a listing, assesses whether its price is fair by comparing it against other listings in the same category in the dataset. Pure dataset arithmetic — no LLM call.
+
+**Input parameters:**
+- `item` (dict): A listing dict (the selected item from `search_listings`). Uses `category` and `price`.
+
+**What it returns:**
+A dict: `{"assessment": str, "item_price": float, "median_comp": float, "comp_count": int, "reasoning": str}`.
+- `assessment` is one of `"good deal"`, `"fair"`, or `"overpriced"`.
+- `median_comp` is the median price of comparable listings (same category, excluding the item itself).
+- `reasoning` is a one-sentence plain-language explanation, e.g. `"At $18 it's below the $21 median for tops, so it's a good deal."`
+
+Assessment thresholds: compare `item_price` to `median_comp`. `<= 0.85 * median` → "good deal"; `>= 1.15 * median` → "overpriced"; otherwise "fair".
+
+**What happens if it fails or returns nothing:**
+If fewer than 2 comparable listings exist in the category (e.g. accessories has only 3), there isn't enough data for a reliable comp. Return `{"assessment": "insufficient data", "item_price": <price>, "median_comp": None, "comp_count": <n>, "reasoning": "Not enough comparable listings in this category to assess the price."}`. Never raises.
+
+---
+
+### Planning Loop — Retry Branch (STRETCH)
+
+The base loop exits immediately when `search_listings` returns `[]`. The retry stretch inserts a loosening sequence before the early exit:
+
+```
+2. Call search_listings(description, size, max_price)
+   - IF results is non-empty: proceed as before (set selected_item, continue).
+   - IF results == []:
+       a. RETRY 1 — drop the size filter:
+          results = search_listings(description, size=None, max_price)
+          IF non-empty: record adjustment "removed size filter", proceed.
+       b. RETRY 2 — also drop the price ceiling:
+          results = search_listings(description, size=None, max_price=None)
+          IF non-empty: record adjustment "removed size and price filters", proceed.
+       c. IF still []: set session["error"] explaining the search was loosened
+          and still found nothing, then return early.
+   - Each adjustment is appended to session["adjustments"] (list[str]) so the
+     UI/CLI can tell the user exactly what was relaxed.
+```
+
+When a retry succeeds, the agent continues to `suggest_outfit` and `create_fit_card` as normal, but the final output notes which constraints were loosened (e.g. "No exact size match — showing the closest find with the size filter removed").
+
+### compare_price integration
+
+`compare_price` runs after `search_listings` succeeds and before `suggest_outfit`, on `session["selected_item"]`. Its result is stored in `session["price_assessment"]` and surfaced alongside the listing in the UI. It never blocks the pipeline — an "insufficient data" result is informational only.
+
+### Updated Architecture (stretch paths)
+
+```
+search_listings(description, size, max_price)
+    │
+    ├── results != [] ─────────────► selected_item = results[0]
+    │                                       │
+    ├── results == [] ──► RETRY (drop size) │
+    │        │                              │
+    │        ├── found ─► adjustments+=["size"] ─► selected_item
+    │        │                              │
+    │        └── still [] ─► RETRY (drop size+price)
+    │                 │                     │
+    │                 ├── found ─► adjustments+=["size","price"] ─► selected_item
+    │                 └── still [] ─► session["error"] set ─► RETURN early
+    │                                       │
+    │                              compare_price(selected_item)  ◄── STRETCH
+    │                                       │
+    │                              session["price_assessment"]
+    │                                       │
+    └──────────────────────────────► suggest_outfit → create_fit_card
+```
+
+### AI Tool Plan — Stretch
+
+For `compare_price`: give Copilot the Tool 4 spec block (inputs, return dict shape, threshold rule, insufficient-data failure mode) plus the `load_listings()` signature. Verify it excludes the item itself from comps, computes median correctly, and returns the insufficient-data dict when comp_count < 2 (test with an accessories item — only 3 in that category). No LLM call.
+
+For the retry branch: give Copilot the retry loop pseudocode above and the current `run_agent()`. Verify it only retries on empty results, tracks adjustments in the session, and still exits cleanly when all retries fail. Test with "designer ballgown size XXS under $5" — should loosen twice, still find nothing, and report what was adjusted.
