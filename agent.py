@@ -46,7 +46,7 @@ def _parse_query_with_gemini(query: str) -> dict:
     
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-2.5-flash-lite",
             contents=f"Parse this thrift shopping query: {query}",
             config=types.GenerateContentConfig(
                 system_instruction=PARSER_PROMPT,

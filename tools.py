@@ -176,7 +176,7 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
             )
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-2.5-flash-lite",
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -247,7 +247,7 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
         )
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-2.5-flash-lite",
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
